@@ -1,49 +1,50 @@
-name: Migrate Mist Kernel Branch to nAa-mist Organization
+name: Migrate Mist Kernel Fast & Clean
 
 on:
   workflow_dispatch:
 
 jobs:
-  migrate:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install git-filter-repo & GitHub CLI
-        run: sudo apt-get update && sudo apt-get install -y git-filter-repo python3-git gh
+    migrate:
+      runs-on: ubuntu-latest
+      steps:
+        - name: Install GitHub CLI
+          run: sudo apt-get update && sudo apt-get install -y gh
 
-      - name: Auto-Create Organization Repo, Process, and Push
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        run: |
-          TARGET_ORG="nAa-mist"
-          REPO_NAME="kernel_xiaomi_mist"
-          FULL_TARGET="$TARGET_ORG/$REPO_NAME"
+        - name: Auto-Create Repo and Push
+          env:
+            GH_PAT: ${{ secrets.GH_PAT }}
+            GH_TOKEN: ${{ secrets.GH_PAT }}
+          run: |
+            TARGET_ORG="nAa-mist"
+            REPO_NAME="kernel_xiaomi_mist"
+            FULL_TARGET="$TARGET_ORG/$REPO_NAME"
 
-          # 1. Automatically create missing repository under the nAa-mist organization
-          echo "Checking if repository $FULL_TARGET exists..."
-          if ! gh repo view "$FULL_TARGET" >/dev/null 2>&1; then
-            echo "Repository does not exist. Creating $FULL_TARGET automatically under $TARGET_ORG..."
-            gh repo create "$FULL_TARGET" --public --description "Xiaomi Mist Kernel source" || true
-          else
-            echo "Repository $FULL_TARGET already exists."
-          fi
+            # 1. Create repo if missing
+            if ! gh repo view "$FULL_TARGET" >/dev/null 2>&1; then
+              gh repo create "$FULL_TARGET" --public --description "Xiaomi Mist Kernel source" || true
+            fi
 
-          # 2. Clone ONLY the mist-w-oss branch with depth limits (ignores all other branch histories)
-          git clone --single-branch --branch mist-w-oss --depth 500 --no-tags https://github.com/MiCode/Xiaomi_Kernel_OpenSource.git "$REPO_NAME"
-          cd "$REPO_NAME"
+            # 2. Clone with a very shallow depth (depth 1) to completely avoid 1-million commit bloat
+            git clone --single-branch --branch mist-w-oss --depth 1 https://github.com/MiCode/Xiaomi_Kernel_OpenSource.git "$REPO_NAME"
+            cd "$REPO_NAME"
 
-          # 3. Rename branch to main
-          git branch -m mist-w-oss main
+            # 3. Reinitialize as a fresh single-commit repository under your name
+            rm -rf .git
+            git init
+            git checkout -b main
 
-          # 4. Rewrite commit identity strictly for HEAD refs to prevent multi-million-parent scanning
-          git filter-repo --refs HEAD --name-callback 'return b"hashyofficial"' --email-callback 'return b"hashyofficial@gmail.com"' --force
+            # Configure your identity
+            git config user.name "hashyofficial"
+            git config user.email "hashyofficial@gmail.com"
 
-          # 5. Configure Git throughput buffers for large kernel pushes
-          git config http.postBuffer 524288000
-          git config http.maxRequestBuffer 100M
-          git config core.compression 0
+            # Add all files as a clean initial commit (or keep recent state)
+            git add .
+            git commit -m "Initial commit: mist-w-oss kernel snapshot"
 
-          # 6. Push rewritten history directly to main branch of target repo
-          git remote remove origin || true
-          git remote add origin "https://x-access-token:${GH_PAT}@github.com/$FULL_TARGET.git"
-          git push -u origin main --force
+            # 4. Configure buffers for large push
+            git config http.postBuffer 524288000
+            git config http.maxRequestBuffer 100M
+
+            # 5. Push to target
+            git remote add origin "https://x-access-token:${GH_PAT}@github.com/$FULL_TARGET.git"
+            git push -u origin main --force
