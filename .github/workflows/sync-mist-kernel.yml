@@ -1,0 +1,49 @@
+name: Migrate Mist Kernel Branch to nAa-mist Organization
+
+on:
+  workflow_dispatch:
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install git-filter-repo & GitHub CLI
+        run: sudo apt-get update && sudo apt-get install -y git-filter-repo python3-git gh
+
+      - name: Auto-Create Organization Repo, Process, and Push
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          TARGET_ORG="nAa-mist"
+          REPO_NAME="kernel_xiaomi_mist"
+          FULL_TARGET="$TARGET_ORG/$REPO_NAME"
+
+          # 1. Automatically create missing repository under the nAa-mist organization
+          echo "Checking if repository $FULL_TARGET exists..."
+          if ! gh repo view "$FULL_TARGET" >/dev/null 2>&1; then
+            echo "Repository does not exist. Creating $FULL_TARGET automatically under $TARGET_ORG..."
+            gh repo create "$FULL_TARGET" --public --description "Xiaomi Mist Kernel source" || true
+          else
+            echo "Repository $FULL_TARGET already exists."
+          fi
+
+          # 2. Clone ONLY the mist-w-oss branch with depth limits (ignores all other branch histories)
+          git clone --single-branch --branch mist-w-oss --depth 500 --no-tags https://github.com/MiCode/Xiaomi_Kernel_OpenSource.git "$REPO_NAME"
+          cd "$REPO_NAME"
+
+          # 3. Rename branch to main
+          git branch -m mist-w-oss main
+
+          # 4. Rewrite commit identity strictly for HEAD refs to prevent multi-million-parent scanning
+          git filter-repo --refs HEAD --name-callback 'return b"hashyofficial"' --email-callback 'return b"hashyofficial@gmail.com"' --force
+
+          # 5. Configure Git throughput buffers for large kernel pushes
+          git config http.postBuffer 524288000
+          git config http.maxRequestBuffer 100M
+          git config core.compression 0
+
+          # 6. Push rewritten history directly to main branch of target repo
+          git remote remove origin || true
+          git remote add origin "https://x-access-token:${GH_PAT}@github.com/$FULL_TARGET.git"
+          git push -u origin main --force
